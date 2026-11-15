@@ -1,0 +1,8 @@
+rojo (0.1.0+git20261022.30cc46f-1menta1) unstable; urgency=medium
+
+  * Menta Linux package of the latest rojo upstream commit 30cc46f (no
+    upstream releases exist).
+  * Install the daemon as /usr/bin/rojo (-Dlibexecdir=bin); enable X11
+    and Wayland backends, GeoClue config and autostart.
+
+ -- Menta Linux <packages@menta-linux.invalid>  Sat, 14 Nov 2026 17:49:42 -0700

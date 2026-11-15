@@ -1,0 +1,17 @@
+#!/usr/bin/make -f
+
+export DEB_BUILD_MAINT_OPTIONS = hardening=+all
+
+%:
+	dh $@ --buildsystem=meson
+
+# Upstream installs the daemon into libexecdir; Menta ships it as /usr/bin/rojo.
+# The D-Bus service file and the autostart entry use libexecdir for their Exec=
+# line, so they follow it to /usr/bin/rojo.
+override_dh_auto_configure:
+	dh_auto_configure -- \
+		-Dlibexecdir=bin \
+		-Dx11=enabled \
+		-Dwayland=enabled \
+		-Dgeoclue_conf=true \
+		-Dautostart=true

@@ -1,0 +1,76 @@
+name: Build Debian packages
+
+on:
+  push:
+    branches: [master]
+    tags: ['menta/*']
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: debian:unstable
+    steps:
+      - name: Install tooling
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            ca-certificates curl git xz-utils quilt devscripts equivs build-essential fakeroot
+
+      - uses: actions/checkout@v4
+
+      - name: Fetch upstream commit
+        run: |
+          # version looks like 0.1.0+git20261022.30cc46f-1menta1 -> commit 30cc46f
+          UPSTREAM=$(dpkg-parsechangelog -S Version | sed 's/-[^-]*$//')
+          COMMIT=${UPSTREAM##*.}
+          mkdir -p ../build
+          git clone https://github.com/KeremSoke/rojo.git ../build/upstream
+          git -C ../build/upstream checkout "$COMMIT"
+          git -C ../build/upstream archive --format=tar --prefix="rojo-${UPSTREAM}/" HEAD \
+            | xz > "../build/rojo_${UPSTREAM}.orig.tar.xz"
+          tar -C ../build -xf "../build/rojo_${UPSTREAM}.orig.tar.xz"
+          cp -a debian "../build/rojo-${UPSTREAM}/"
+          echo "SRCDIR=$(realpath ../build/rojo-${UPSTREAM})" >> "$GITHUB_ENV"
+
+      - name: Apply quilt patches
+        working-directory: ${{ env.SRCDIR }}
+        run: |
+          export QUILT_PATCHES=debian/patches
+          quilt push -a || [ $? -eq 2 ]   # 2 = nothing to apply
+
+      - name: Install build dependencies
+        working-directory: ${{ env.SRCDIR }}
+        run: |
+          mk-build-deps -i -r -t "apt-get -y --no-install-recommends" debian/control
+
+      - name: Build
+        working-directory: ${{ env.SRCDIR }}
+        run: dpkg-buildpackage -us -uc -b
+
+      - name: Collect artifacts
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/artifacts"
+          cp -v ../build/*.deb ../build/*.buildinfo ../build/*.changes "$GITHUB_WORKSPACE/artifacts/"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rojo-debs
+          path: artifacts/*
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/menta/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: rojo-debs
+          path: artifacts
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
