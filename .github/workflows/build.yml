@@ -19,7 +19,7 @@ jobs:
         run: |
           apt-get update
           apt-get install -y --no-install-recommends \
-            ca-certificates curl git xz-utils quilt devscripts equivs build-essential fakeroot
+            ca-certificates curl git xz-utils quilt jq gh devscripts equivs build-essential fakeroot
 
       - uses: actions/checkout@v4
 
