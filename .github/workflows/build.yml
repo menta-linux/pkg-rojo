@@ -41,13 +41,13 @@ jobs:
         working-directory: ${{ env.SRCDIR }}
         run: |
           export QUILT_PATCHES=debian/patches
-          quilt push -a || [ $? -eq 2 ]   # 2 = nothing to apply
+          if [ -s debian/patches/series ]; then quilt push -a; fi
 
       - name: Install build dependencies
         working-directory: ${{ env.SRCDIR }}
         run: |
           set -o pipefail
-          mk-build-deps -i -r -t "apt-get -y --no-install-recommends" debian/control 2>&1 | tee /tmp/deps.log
+          (mk-build-deps debian/control && apt-get install -y --no-install-recommends ./*-build-deps_*.deb) 2>&1 | tee /tmp/deps.log
 
       - name: Build
         working-directory: ${{ env.SRCDIR }}
@@ -60,7 +60,7 @@ jobs:
         run: |
           for f in /tmp/menta.log /tmp/deps.log /tmp/build.log; do
             [ -f "$f" ] || continue
-            msg=$(tail -n 45 "$f" | cut -c1-220 | tr -d '\r' | sed 's/%/%25/g' | sed ':a;N;$!ba;s/\n/%0A/g')
+            msg=$( { grep -E '^E:|unmet|Unable|not installable|Depends:|but it is|error:|Error ' "$f" | head -15; echo ----; tail -n 30 "$f"; } | cut -c1-220 | tr -d '\r' | sed 's/%/%25/g' | sed ':a;N;$!ba;s/\n/%0A/g')
             echo "::error title=$(basename "$f")::$msg"
           done
 
