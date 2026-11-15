@@ -10,6 +10,8 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     container:
       image: debian:unstable
     steps:
@@ -44,11 +46,23 @@ jobs:
       - name: Install build dependencies
         working-directory: ${{ env.SRCDIR }}
         run: |
-          mk-build-deps -i -r -t "apt-get -y --no-install-recommends" debian/control
+          set -o pipefail
+          mk-build-deps -i -r -t "apt-get -y --no-install-recommends" debian/control 2>&1 | tee /tmp/deps.log
 
       - name: Build
         working-directory: ${{ env.SRCDIR }}
-        run: dpkg-buildpackage -us -uc -b
+        run: |
+          set -o pipefail
+          dpkg-buildpackage -us -uc -b 2>&1 | tee /tmp/build.log
+
+      - name: Report failure
+        if: failure()
+        run: |
+          for f in /tmp/menta.log /tmp/deps.log /tmp/build.log; do
+            [ -f "$f" ] || continue
+            msg=$(tail -n 45 "$f" | cut -c1-220 | tr -d '\r' | sed 's/%/%25/g' | sed ':a;N;$!ba;s/\n/%0A/g')
+            echo "::error title=$(basename "$f")::$msg"
+          done
 
       - name: Collect artifacts
         run: |
@@ -60,17 +74,18 @@ jobs:
           name: rojo-debs
           path: artifacts/*
 
-  release:
-    needs: build
-    if: startsWith(github.ref, 'refs/tags/menta/')
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: rojo-debs
-          path: artifacts
-      - uses: softprops/action-gh-release@v2
-        with:
-          files: artifacts/*
+      - name: Publish rolling release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete latest --cleanup-tag -y -R "$GITHUB_REPOSITORY" || true
+          gh release create latest artifacts/* -R "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "latest" --notes "Rolling build of $GITHUB_SHA"
+
+      - name: Publish tagged release
+        if: startsWith(github.ref, 'refs/tags/menta/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" artifacts/* -R "$GITHUB_REPOSITORY" --title "${GITHUB_REF_NAME}" --notes "Build of $GITHUB_SHA"
