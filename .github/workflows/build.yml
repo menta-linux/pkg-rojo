@@ -15,8 +15,8 @@ permissions:
   contents: read
 jobs:
   build:
-    uses: menta-linux/orchestrator/.github/workflows/build-worker.yml@112b9dd371769ec14742de7997b36ab8995eb3a8
+    uses: menta-linux/orchestrator/.github/workflows/build-worker.yml@b37fc43336fcd62ab41a95bc4f94c1eb65e5d1ab
     with:
       candidate_id: ${{ inputs.candidate_id }}
       authorization_id: ${{ inputs.authorization_id }}
-      orchestrator_sha: 112b9dd371769ec14742de7997b36ab8995eb3a8
+      orchestrator_sha: b37fc43336fcd62ab41a95bc4f94c1eb65e5d1ab
