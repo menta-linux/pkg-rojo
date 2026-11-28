@@ -1,122 +1,22 @@
-name: Build Debian packages
-
+name: build
+# Thin, standardized package workflow. It does NOT discover releases or decide anything: it only runs when the orchestrator dispatches
+# it with identifiers, and the shared worker refuses without a valid signed authorization. Development builds must not publish.
+run-name: menta-build ${{ substr(inputs.candidate_id, 7, 16) }}
 on:
-  push:
-    branches: [master]
-    tags: ['menta/*']
-  pull_request:
   workflow_dispatch:
-
+    inputs:
+      candidate_id:
+        required: true
+        type: string
+      authorization_id:
+        required: true
+        type: string
+permissions:
+  contents: read
 jobs:
   build:
-    name: build (${{ matrix.suite }})
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    strategy:
-      fail-fast: false
-      matrix:
-        suite: [unstable, trixie]
-    env:
-      SUITE: ${{ matrix.suite }}
-      # rolling release tag: "latest" for unstable (unchanged, install-menta.sh relies on it), "latest-trixie" for stable
-      RELTAG: ${{ matrix.suite == 'unstable' && 'latest' || format('latest-{0}', matrix.suite) }}
-    container:
-      image: debian:${{ matrix.suite }}
-    steps:
-      - name: Install tooling
-        run: |
-          apt-get update
-          apt-get install -y --no-install-recommends \
-            ca-certificates curl git quilt xz-utils jq devscripts equivs build-essential fakeroot
-          if [ "$SUITE" = trixie ]; then
-            # Debian stable: enable trixie-backports (newer wayland-protocols etc.). Only explicitly
-            # requested packages come from backports (NotAutomatic), so nothing else changes.
-            echo "deb http://deb.debian.org/debian trixie-backports main" > /etc/apt/sources.list.d/backports.list
-            [ -f /etc/apt/sources.list.d/debian.sources ] && \
-              sed -i 's/^Suites: trixie trixie-updates$/Suites: trixie trixie-updates trixie-backports/' /etc/apt/sources.list.d/debian.sources || true
-            apt-get update
-            apt-get install -y --no-install-recommends -t trixie-backports gh wayland-protocols || apt-get install -y --no-install-recommends gh
-            # Menta-built backports (libxfce4windowing, gtk-layer-shell) come from the rolling releases below.
-          else
-            apt-get install -y --no-install-recommends gh
-          fi
-
-      - uses: actions/checkout@v4
-
-      - name: Fetch upstream commit
-        run: |
-          # version looks like 0.1.0+git20261022.30cc46f-1menta1 -> commit 30cc46f
-          UPSTREAM=$(dpkg-parsechangelog -S Version | sed 's/-[^-]*$//')
-          COMMIT=${UPSTREAM##*.}
-          mkdir -p ../build
-          git clone https://github.com/KeremSoke/rojo.git ../build/upstream
-          git -C ../build/upstream checkout "$COMMIT"
-          git -C ../build/upstream archive --format=tar --prefix="rojo-${UPSTREAM}/" HEAD \
-            | xz > "../build/rojo_${UPSTREAM}.orig.tar.xz"
-          tar -C ../build -xf "../build/rojo_${UPSTREAM}.orig.tar.xz"
-          cp -a debian "../build/rojo-${UPSTREAM}/"
-          echo "SRCDIR=$(realpath ../build/rojo-${UPSTREAM})" >> "$GITHUB_ENV"
-
-      - name: Mark stable build version
-        if: matrix.suite == 'trixie'
-        working-directory: ${{ env.SRCDIR }}
-        run: |
-          # ~deb13 sorts below the unstable build of the same version; distinct suite in changelog
-          V=$(dpkg-parsechangelog -S Version)
-          DEBFULLNAME="Menta Linux" DEBEMAIL="packages@menta-linux.invalid" \
-            dch -b -v "${V}~deb13" -D trixie "Rebuild for Debian 13 (trixie) with trixie-backports and Menta backports."
-
-      - name: Apply quilt patches
-        working-directory: ${{ env.SRCDIR }}
-        run: |
-          export QUILT_PATCHES=debian/patches
-          if [ -s debian/patches/series ]; then quilt push -a; fi
-
-      - name: Install build dependencies
-        working-directory: ${{ env.SRCDIR }}
-        run: |
-          set -o pipefail
-          (mk-build-deps debian/control && apt-get install -y --no-install-recommends ./*-build-deps_*.deb) 2>&1 | tee /tmp/deps.log
-
-      - name: Build
-        working-directory: ${{ env.SRCDIR }}
-        run: |
-          set -o pipefail
-          dpkg-buildpackage -us -uc -b 2>&1 | tee /tmp/build.log
-
-      - name: Report failure
-        if: failure()
-        run: |
-          for f in /tmp/menta.log /tmp/deps.log /tmp/build.log; do
-            [ -f "$f" ] || continue
-            msg=$( { grep -E '^E:|unmet|Unable|not installable|Depends:|but it is|error:|Error ' "$f" | head -15; echo ----; tail -n 30 "$f"; } | cut -c1-220 | tr -d '\r' | sed 's/%/%25/g' | sed ':a;N;$!ba;s/\n/%0A/g')
-            echo "::error title=$(basename "$f")::$msg"
-          done
-
-      - name: Collect artifacts
-        run: |
-          mkdir -p "$GITHUB_WORKSPACE/artifacts"
-          cp -v ../build/*.deb ../build/*.buildinfo ../build/*.changes "$GITHUB_WORKSPACE/artifacts/"
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: rojo-debs-${{ matrix.suite }}
-          path: artifacts/*
-
-      - name: Publish rolling release
-        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release delete "$RELTAG" --cleanup-tag -y -R "$GITHUB_REPOSITORY" || true
-          gh release create "$RELTAG" artifacts/* -R "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
-            --title "$RELTAG" --notes "Rolling $SUITE build of $GITHUB_SHA"
-
-      - name: Publish tagged release
-        if: startsWith(github.ref, 'refs/tags/menta/')
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          TAG="${GITHUB_REF_NAME}"; [ "$SUITE" = unstable ] || TAG="${TAG}-${SUITE}"
-          gh release create "$TAG" artifacts/* -R "$GITHUB_REPOSITORY" --title "$TAG" --notes "$SUITE build of $GITHUB_SHA"
+    uses: menta-linux/orchestrator/.github/workflows/build-worker.yml@75a8be38c682bc43940bfc201ac28cd5cea80d53
+    with:
+      candidate_id: ${{ inputs.candidate_id }}
+      authorization_id: ${{ inputs.authorization_id }}
+      orchestrator_sha: 75a8be38c682bc43940bfc201ac28cd5cea80d53
