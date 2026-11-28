@@ -1,7 +1,7 @@
 name: build
 # Thin, standardized package workflow. It does NOT discover releases or decide anything: it only runs when the orchestrator dispatches
 # it with identifiers, and the shared worker refuses without a valid signed authorization. Development builds must not publish.
-run-name: menta-build ${{ substr(inputs.candidate_id, 7, 16) }}
+run-name: menta-build ${{ inputs.candidate_id }}
 on:
   workflow_dispatch:
     inputs:
@@ -15,8 +15,8 @@ permissions:
   contents: read
 jobs:
   build:
-    uses: menta-linux/orchestrator/.github/workflows/build-worker.yml@3df1cb4661e0cecb2db83af763915aeae2c9d6ab
+    uses: menta-linux/orchestrator/.github/workflows/build-worker.yml@cad5730467af2e98ebc9cb489c4d58c13ee6c15b
     with:
       candidate_id: ${{ inputs.candidate_id }}
       authorization_id: ${{ inputs.authorization_id }}
-      orchestrator_sha: 3df1cb4661e0cecb2db83af763915aeae2c9d6ab
+      orchestrator_sha: cad5730467af2e98ebc9cb489c4d58c13ee6c15b
